@@ -3,10 +3,12 @@
 import { useState, useEffect } from "react"
 import { FileUpload } from "@/components/file-upload"
 import { ChatInterface } from "@/components/chat-interface"
+import { DashboardOverview } from "@/components/dashboard-overview"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { BarChart3, MessageSquare, Upload, Zap, Trash2, Download, ArrowLeft } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { BarChart3, MessageSquare, Upload, Zap, Trash2, Download, ArrowLeft, LayoutDashboard } from "lucide-react"
 import Link from "next/link"
 
 interface CSVData {
@@ -17,9 +19,10 @@ interface CSVData {
 }
 
 interface Message {
-  type: "user" | "bot"
+  type: "user" | "bot" | "report"
   message: string
   timestamp: Date
+  report?: any
 }
 
 export default function ChatPage() {
@@ -32,6 +35,8 @@ export default function ChatPage() {
       timestamp: new Date(),
     },
   ])
+  const [activeTab, setActiveTab] = useState("dashboard")
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false)
 
   const handleFileUpload = (data: CSVData) => {
     setCsvData(data)
@@ -43,6 +48,7 @@ export default function ChatPage() {
         timestamp: new Date(),
       },
     ])
+    setActiveTab("chat") // Switch to chat tab after upload
   }
 
   const handleClearChat = () => {
@@ -75,6 +81,52 @@ export default function ChatPage() {
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
   }
+
+  const handleGenerateReport = async () => {
+    if (!csvData) return
+
+    setIsGeneratingReport(true)
+    try {
+      const response = await fetch("/api/generate-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csvData }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to generate report")
+      }
+
+      const { report } = await response.json()
+
+      setChatHistory((prev) => [
+        ...prev,
+        {
+          type: "report",
+          message: "📊 Comprehensive Business Report Generated",
+          timestamp: new Date(),
+          report,
+        },
+      ])
+
+      setActiveTab("chat")
+    } catch (error) {
+      console.error("Report generation error:", error)
+      setChatHistory((prev) => [
+        ...prev,
+        {
+          type: "bot",
+          message: "❌ Sorry, I couldn't generate the report. Please try again.",
+          timestamp: new Date(),
+        },
+      ])
+    } finally {
+      setIsGeneratingReport(false)
+    }
+  }
+
+  const reportsGenerated = chatHistory.filter((msg) => msg.type === "report").length
+  const messagesCount = chatHistory.filter((msg) => msg.type === "user").length
 
   useEffect(() => {
     // Load chat history from localStorage on component mount
@@ -149,12 +201,12 @@ export default function ChatPage() {
         </div>
       </nav>
 
-      <div className="container mx-auto px-4 py-8 max-w-6xl">
+      <div className="container mx-auto px-4 py-8 max-w-7xl">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-serif font-bold text-foreground mb-2">Chat with Your Data</h1>
+          <h1 className="text-4xl font-serif font-bold text-foreground mb-2">Business Analysis Dashboard</h1>
           <p className="text-muted-foreground text-lg mb-6">
-            Upload your CSV and start asking questions in natural language
+            Upload your CSV and get comprehensive business insights with AI-powered analysis
           </p>
 
           {/* Feature badges */}
@@ -162,6 +214,10 @@ export default function ChatPage() {
             <Badge variant="secondary" className="flex items-center gap-1">
               <Upload className="w-3 h-3" />
               Easy Upload
+            </Badge>
+            <Badge variant="secondary" className="flex items-center gap-1">
+              <LayoutDashboard className="w-3 h-3" />
+              Live Dashboard
             </Badge>
             <Badge variant="secondary" className="flex items-center gap-1">
               <MessageSquare className="w-3 h-3" />
@@ -173,16 +229,16 @@ export default function ChatPage() {
             </Badge>
             <Badge variant="secondary" className="flex items-center gap-1">
               <Zap className="w-3 h-3" />
-              Instant Insights
+              Instant Reports
             </Badge>
           </div>
         </div>
 
-        {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* File Upload Section */}
+        {/* Main Dashboard */}
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Sidebar */}
           <div className="lg:col-span-1">
-            <Card className="p-6">
+            <Card className="p-6 sticky top-24">
               <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
                 <Upload className="w-5 h-5 text-primary" />
                 Upload Data
@@ -197,7 +253,7 @@ export default function ChatPage() {
                       <strong>Name:</strong> {csvData.fileName}
                     </p>
                     <p>
-                      <strong>Rows:</strong> {csvData.rowCount}
+                      <strong>Rows:</strong> {csvData.rowCount.toLocaleString()}
                     </p>
                     <p>
                       <strong>Columns:</strong> {csvData.schema.length}
@@ -207,12 +263,30 @@ export default function ChatPage() {
                       {csvData.schema.length > 3 ? "..." : ""}
                     </p>
                   </div>
+                  <Button
+                    onClick={handleGenerateReport}
+                    disabled={isGeneratingReport}
+                    className="w-full mt-3"
+                    size="sm"
+                  >
+                    {isGeneratingReport ? (
+                      <>
+                        <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <BarChart3 className="w-3 h-3 mr-2" />
+                        Generate Report
+                      </>
+                    )}
+                  </Button>
                 </div>
               )}
 
               {chatHistory.length > 1 && (
                 <div className="mt-4 space-y-2">
-                  <h3 className="font-medium text-sm">Chat Management:</h3>
+                  <h3 className="font-medium text-sm">Management:</h3>
                   <div className="flex gap-2">
                     <Button
                       variant="outline"
@@ -221,7 +295,7 @@ export default function ChatPage() {
                       className="flex-1 text-xs bg-transparent"
                     >
                       <Trash2 className="w-3 h-3 mr-1" />
-                      Clear Chat
+                      Clear
                     </Button>
                     <Button
                       variant="outline"
@@ -233,28 +307,55 @@ export default function ChatPage() {
                       Export
                     </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">{chatHistory.length} messages • Auto-saved</p>
+                  <p className="text-xs text-muted-foreground">
+                    {reportsGenerated} reports • {messagesCount} messages
+                  </p>
                 </div>
               )}
             </Card>
           </div>
 
-          {/* Chat Interface */}
-          <div className="lg:col-span-2">
-            <div className="mb-4">
-              <h2 className="text-xl font-semibold flex items-center gap-2">
-                <MessageSquare className="w-5 h-5 text-primary" />
-                Data Assistant
-              </h2>
-              <p className="text-sm text-muted-foreground mt-1">Ask questions about your data in natural language</p>
-            </div>
-            <ChatInterface chatHistory={chatHistory} setChatHistory={setChatHistory} csvData={csvData} />
+          {/* Main Content */}
+          <div className="lg:col-span-3">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="dashboard" className="flex items-center gap-2">
+                  <LayoutDashboard className="w-4 h-4" />
+                  Dashboard
+                </TabsTrigger>
+                <TabsTrigger value="chat" className="flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4" />
+                  Chat Analysis
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="dashboard" className="space-y-6">
+                <DashboardOverview
+                  csvData={csvData}
+                  reportsGenerated={reportsGenerated}
+                  messagesCount={messagesCount}
+                />
+              </TabsContent>
+
+              <TabsContent value="chat" className="space-y-6">
+                <div className="mb-4">
+                  <h2 className="text-xl font-semibold flex items-center gap-2">
+                    <MessageSquare className="w-5 h-5 text-primary" />
+                    AI Data Assistant
+                  </h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Ask questions about your data in natural language and generate comprehensive business reports
+                  </p>
+                </div>
+                <ChatInterface chatHistory={chatHistory} setChatHistory={setChatHistory} csvData={csvData} />
+              </TabsContent>
+            </Tabs>
           </div>
         </div>
 
         {/* Footer */}
         <div className="mt-12 text-center text-sm text-muted-foreground">
-          <p>Powered by AI • Secure data processing • Chat history saved locally</p>
+          <p>Powered by AI • Secure data processing • Advanced business analytics • PDF reports</p>
         </div>
       </div>
     </div>

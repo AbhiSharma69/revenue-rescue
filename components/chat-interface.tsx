@@ -7,14 +7,17 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Send, Bot, User, Loader2, AlertCircle } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Send, Bot, User, Loader2, AlertCircle, FileText, BarChart3 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { BusinessReport } from "./business-report"
 import { cn } from "@/lib/utils"
 
 interface Message {
-  type: "user" | "bot"
+  type: "user" | "bot" | "report"
   message: string
   timestamp: Date
+  report?: any
 }
 
 interface CSVData {
@@ -33,6 +36,7 @@ interface ChatInterfaceProps {
 export function ChatInterface({ chatHistory, setChatHistory, csvData }: ChatInterfaceProps) {
   const [inputMessage, setInputMessage] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -43,6 +47,18 @@ export function ChatInterface({ chatHistory, setChatHistory, csvData }: ChatInte
       scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight
     }
   }, [chatHistory])
+
+  const sanitizeMessage = (message: string): string => {
+    return message
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+      .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, "")
+      .replace(/javascript:/gi, "")
+      .replace(/on\w+\s*=/gi, "")
+      .replace(/\*\*(.*?)\*\*/g, "$1") // Remove markdown bold
+      .replace(/\*(.*?)\*/g, "$1") // Remove markdown italic
+      .replace(/#{1,6}\s/g, "") // Remove markdown headers
+      .trim()
+  }
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return
@@ -77,9 +93,11 @@ export function ChatInterface({ chatHistory, setChatHistory, csvData }: ChatInte
         throw new Error(data.error || `HTTP ${response.status}: Failed to get response`)
       }
 
+      const sanitizedResponse = sanitizeMessage(data.response)
+
       const botMessage: Message = {
         type: "bot",
-        message: data.response,
+        message: sanitizedResponse,
         timestamp: new Date(),
       }
 
@@ -101,6 +119,64 @@ export function ChatInterface({ chatHistory, setChatHistory, csvData }: ChatInte
     }
   }
 
+  const handleGenerateReport = async () => {
+    if (!csvData || isGeneratingReport) return
+
+    setIsGeneratingReport(true)
+    setError(null)
+
+    try {
+      const response = await fetch("/api/generate-report", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          csvData,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate business report")
+      }
+
+      const reportMessage: Message = {
+        type: "report",
+        message: "Comprehensive Business Analysis Report Generated",
+        timestamp: new Date(),
+        report: data.report,
+      }
+
+      setChatHistory((prev) => [...prev, reportMessage])
+
+      // Add a bot message explaining the report
+      const botMessage: Message = {
+        type: "bot",
+        message:
+          "I've generated a comprehensive business analysis report based on your data. The report includes churn analysis, financial projections, demand forecasting, scenario analysis, and strategic recommendations. You can download it as a PDF using the button in the report.",
+        timestamp: new Date(),
+      }
+
+      setChatHistory((prev) => [...prev, botMessage])
+    } catch (error) {
+      console.error("Report generation error:", error)
+      const errorMsg = error instanceof Error ? error.message : "Failed to generate report"
+      setError(errorMsg)
+
+      const errorMessage: Message = {
+        type: "bot",
+        message:
+          "Sorry, I couldn't generate the business report. Please try again or check if your data contains the necessary business metrics.",
+        timestamp: new Date(),
+      }
+      setChatHistory((prev) => [...prev, errorMessage])
+    } finally {
+      setIsGeneratingReport(false)
+    }
+  }
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
@@ -117,6 +193,29 @@ export function ChatInterface({ chatHistory, setChatHistory, csvData }: ChatInte
         </Alert>
       )}
 
+      {csvData && (
+        <div className="flex justify-center animate-in slide-in-from-top duration-500">
+          <Button
+            onClick={handleGenerateReport}
+            disabled={isGeneratingReport}
+            className="bg-secondary hover:bg-secondary/90 text-secondary-foreground transition-all duration-300 hover:scale-105 hover:shadow-lg"
+            size="lg"
+          >
+            {isGeneratingReport ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Generating Report...
+              </>
+            ) : (
+              <>
+                <FileText className="w-4 h-4 mr-2" />
+                Generate Business Report
+              </>
+            )}
+          </Button>
+        </div>
+      )}
+
       <Card className="flex flex-col h-[600px] transition-all duration-300 hover:shadow-lg">
         {/* Chat Messages */}
         <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
@@ -124,41 +223,61 @@ export function ChatInterface({ chatHistory, setChatHistory, csvData }: ChatInte
             {chatHistory.map((msg, index) => (
               <div
                 key={index}
-                className={cn(
-                  "flex gap-3 animate-in slide-in-from-bottom duration-500",
-                  msg.type === "user" ? "justify-end" : "justify-start",
-                )}
+                className="animate-in slide-in-from-bottom duration-500"
                 style={{ animationDelay: `${index * 100}ms` }}
               >
-                {msg.type === "bot" && (
-                  <div className="flex-shrink-0 w-8 h-8 bg-primary rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 hover:shadow-lg">
-                    <Bot className="w-4 h-4 text-primary-foreground" />
+                {msg.type === "report" ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-center">
+                      <Badge variant="secondary" className="flex items-center gap-2 px-4 py-2">
+                        <BarChart3 className="w-4 h-4" />
+                        {msg.message}
+                        <span className="text-xs opacity-70">
+                          {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      </Badge>
+                    </div>
+                    {msg.report && <BusinessReport report={msg.report} />}
                   </div>
-                )}
+                ) : (
+                  <div className={cn("flex gap-3", msg.type === "user" ? "justify-end" : "justify-start")}>
+                    {msg.type === "bot" && (
+                      <div className="flex-shrink-0 w-8 h-8 bg-primary rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 hover:shadow-lg">
+                        <Bot className="w-4 h-4 text-primary-foreground" />
+                      </div>
+                    )}
 
-                <div
-                  className={cn(
-                    "max-w-[80%] rounded-lg px-4 py-2 text-sm transition-all duration-300 hover:scale-[1.02] hover:shadow-md",
-                    msg.type === "user"
-                      ? "bg-primary text-primary-foreground ml-auto"
-                      : "bg-muted text-muted-foreground",
-                  )}
-                >
-                  <p className="whitespace-pre-wrap">{msg.message}</p>
-                  <p className="text-xs opacity-70 mt-1 transition-opacity duration-300 hover:opacity-100">
-                    {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  </p>
-                </div>
+                    <div
+                      className={cn(
+                        "max-w-[80%] rounded-lg px-4 py-2 text-sm transition-all duration-300 hover:scale-[1.02] hover:shadow-md",
+                        msg.type === "user"
+                          ? "bg-primary text-primary-foreground ml-auto"
+                          : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      <div className="whitespace-pre-wrap leading-relaxed">
+                        {msg.message.split("\n").map((line, lineIndex) => (
+                          <div key={lineIndex} className={line.startsWith("•") || line.startsWith("-") ? "ml-2" : ""}>
+                            {line}
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-xs opacity-70 mt-2 transition-opacity duration-300 hover:opacity-100">
+                        {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    </div>
 
-                {msg.type === "user" && (
-                  <div className="flex-shrink-0 w-8 h-8 bg-secondary rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 hover:shadow-lg">
-                    <User className="w-4 h-4 text-secondary-foreground" />
+                    {msg.type === "user" && (
+                      <div className="flex-shrink-0 w-8 h-8 bg-secondary rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 hover:shadow-lg">
+                        <User className="w-4 h-4 text-secondary-foreground" />
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
             ))}
 
-            {isLoading && (
+            {(isLoading || isGeneratingReport) && (
               <div className="flex gap-3 justify-start animate-in slide-in-from-bottom duration-300">
                 <div className="flex-shrink-0 w-8 h-8 bg-primary rounded-full flex items-center justify-center">
                   <Bot className="w-4 h-4 text-primary-foreground" />
@@ -166,7 +285,9 @@ export function ChatInterface({ chatHistory, setChatHistory, csvData }: ChatInte
                 <div className="bg-muted rounded-lg px-4 py-2 text-sm">
                   <div className="flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span className="text-muted-foreground">Analyzing your data...</span>
+                    <span className="text-muted-foreground">
+                      {isGeneratingReport ? "Generating comprehensive business report..." : "Analyzing your data..."}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -185,12 +306,12 @@ export function ChatInterface({ chatHistory, setChatHistory, csvData }: ChatInte
               placeholder={
                 csvData ? "Ask me anything about your data..." : "Upload a CSV file first to start chatting..."
               }
-              disabled={!csvData || isLoading}
+              disabled={!csvData || isLoading || isGeneratingReport}
               className="flex-1 transition-all duration-300 focus:ring-2 focus:ring-primary/20 focus:scale-[1.02]"
             />
             <Button
               onClick={handleSendMessage}
-              disabled={!inputMessage.trim() || !csvData || isLoading}
+              disabled={!inputMessage.trim() || !csvData || isLoading || isGeneratingReport}
               size="icon"
               className="transition-all duration-300 hover:scale-110 hover:shadow-lg active:scale-95 disabled:hover:scale-100"
             >
@@ -199,8 +320,13 @@ export function ChatInterface({ chatHistory, setChatHistory, csvData }: ChatInte
           </div>
 
           {csvData && (
-            <div className="mt-2 text-xs text-muted-foreground animate-in slide-in-from-bottom duration-500 delay-200">
-              Analyzing: {csvData.fileName} ({csvData.rowCount} rows, {csvData.schema.length} columns)
+            <div className="mt-2 flex items-center justify-between">
+              <div className="text-xs text-muted-foreground animate-in slide-in-from-bottom duration-500 delay-200">
+                Analyzing: {csvData.fileName} ({csvData.rowCount} rows, {csvData.schema.length} columns)
+              </div>
+              <Badge variant="outline" className="text-xs">
+                Business Analysis Ready
+              </Badge>
             </div>
           )}
         </div>

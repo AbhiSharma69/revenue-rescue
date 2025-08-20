@@ -19,6 +19,15 @@ interface ChatRequest {
   chatHistory: Message[]
 }
 
+function sanitizeOutput(text: string): string {
+  return text
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, "")
+    .replace(/javascript:/gi, "")
+    .replace(/on\w+\s*=/gi, "")
+    .trim()
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { message, csvData, chatHistory }: ChatRequest = await request.json()
@@ -27,24 +36,39 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Message is required" }, { status: 400 })
     }
 
-    const systemInstruction = `You are a helpful data analyst chatbot. Your job is to analyze CSV data provided by the user and answer questions in simple, clear, and actionable insights. Always use the dataset schema, row count, and sample rows given. If data is missing, explain that clearly. Suggest possible visualizations where relevant.`
+    const systemInstruction = `You are a professional business data analyst and AI assistant. Your role is to:
 
-    // Build context from CSV data
+1. Analyze CSV business data (sales, customers, revenue, expenses, churn, etc.)
+2. Provide clear, actionable insights in simple language
+3. Suggest specific business strategies and recommendations
+4. Identify trends, patterns, and opportunities in the data
+5. Offer quantitative analysis with numbers and percentages when possible
+
+Always be professional, accurate, and focus on business value. If asked about generating reports, mention that comprehensive business reports can be generated separately.
+
+Key areas to focus on:
+- Revenue and profit analysis
+- Customer behavior and churn patterns
+- Sales performance and trends
+- Cost optimization opportunities
+- Growth forecasting and predictions
+- Risk assessment and mitigation`
+
     let csvContext = ""
     if (csvData) {
       csvContext = `
-Dataset Information:
+BUSINESS DATASET CONTEXT:
 - File: ${csvData.fileName}
-- Total Rows: ${csvData.rowCount}
-- Columns (${csvData.schema.length}): ${csvData.schema.join(", ")}
+- Total Records: ${csvData.rowCount}
+- Data Fields (${csvData.schema.length}): ${csvData.schema.join(", ")}
 
-Sample Data (first ${csvData.sample.length} rows):
-${csvData.sample.map((row, index) => `Row ${index + 1}: ${JSON.stringify(row)}`).join("\n")}
+Sample Business Data (${csvData.sample.length} rows analyzed):
+${csvData.sample.map((row, index) => `Record ${index + 1}: ${JSON.stringify(row)}`).join("\n")}
 
-Note: This analysis is based on a sample of ${csvData.sample.length} rows from the full dataset of ${csvData.rowCount} rows due to processing limitations.
-`
+ANALYSIS SCOPE: This analysis covers ${csvData.sample.length} sample records from a total dataset of ${csvData.rowCount} records. Insights are extrapolated to represent the full dataset where applicable.`
     } else {
-      csvContext = "No CSV data has been uploaded yet. Please ask the user to upload a CSV file first."
+      csvContext =
+        "No business data uploaded yet. Please upload a CSV file containing your business data (sales, customers, revenue, etc.) to begin analysis."
     }
 
     // Limit to last 10 messages to manage token usage while maintaining context
@@ -106,7 +130,9 @@ Please provide a helpful, clear response based on the available data. If the que
     }
 
     const data = await response.json()
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I couldn't generate a response."
+    let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I couldn't generate a response."
+
+    text = sanitizeOutput(text)
 
     return NextResponse.json({ response: text })
   } catch (error) {
